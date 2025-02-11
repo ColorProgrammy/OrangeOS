@@ -6,7 +6,7 @@
 Before using this product, please review the license. 
 All Orange products are owned by ColorProgrammy.
 
-Copyright ColorProgrammy (c) 2025
+Copyright (c) 2025 ColorProgrammy
 */
 
 #include <Wire.h>
