@@ -52,7 +52,9 @@ uint8_t currentFileIdx = 255;
 bool displayNeedsFullRedraw = true;
 uint8_t currentCharIndex = 0;
 
-int8_t vars[32];
+int8_t vars8[32];
+uint16_t vars16[8];
+uint32_t vars32[16];
 uint16_t pc;
 bool oefRunning = false;
 bool oefPaused = false;
@@ -66,9 +68,97 @@ uint8_t contextMenuIndex = 0;
 const char* contextItems[] = {"Settings", "Info"};
 const uint8_t contextCount = 2;
 
-const char* greetings[] = {"Welcome!", "Home Sweet Home", "Hello User", "OrangeOS Ready", "Good Day!"};
-const uint8_t greetCount = 5;
-uint8_t currentGreeting = 0;
+const char greetings[] = "OrangeOS Ready";
+
+static const char str_STR[] PROGMEM = "STR";
+static const char str_PRINT[] PROGMEM = "PRINT";
+static const char str_EXIT[] PROGMEM = "EXIT";
+static const char str_JUMP[] PROGMEM = "JUMP";
+static const char str_LET[] PROGMEM = "LET";
+static const char str_DELAY[] PROGMEM = "DELAY";
+static const char str_TONE[] PROGMEM = "TONE";
+static const char str_CLS[] PROGMEM = "CLS";
+static const char str_PAUSE[] PROGMEM = "PAUSE";
+static const char str_INC[] PROGMEM = "INC";
+static const char str_DEC[] PROGMEM = "DEC";
+static const char str_IF[] PROGMEM = "IF";
+static const char str_WAITKEY[] PROGMEM = "WAITKEY";
+static const char str_RAND[] PROGMEM = "RAND";
+static const char str_LOCATE[] PROGMEM = "LOCATE";
+static const char str_PLAYNOTE[] PROGMEM = "PLAYNOTE";
+static const char str_ADD[] PROGMEM = "ADD";
+static const char str_SUB[] PROGMEM = "SUB";
+static const char str_MUL[] PROGMEM = "MUL";
+static const char str_DIV[] PROGMEM = "DIV";
+static const char str_GETBTN[] PROGMEM = "GETBTN";
+static const char str_LET16[] PROGMEM = "LET16";
+static const char str_INC16[] PROGMEM = "INC16";
+static const char str_DEC16[] PROGMEM = "DEC16";
+static const char str_ADD16[] PROGMEM = "ADD16";
+static const char str_SUB16[] PROGMEM = "SUB16";
+static const char str_MUL16[] PROGMEM = "MUL16";
+static const char str_DIV16[] PROGMEM = "DIV16";
+static const char str_PRINT16[] PROGMEM = "PRINT16";
+static const char str_IFEQ16[] PROGMEM = "IFEQ16";
+static const char str_IFNE16[] PROGMEM = "IFNE16";
+static const char str_IFGT16[] PROGMEM = "IFGT16";
+static const char str_IFLT16[] PROGMEM = "IFLT16";
+static const char str_RAND16[] PROGMEM = "RAND16";
+static const char str_LET32[] PROGMEM = "LET32";
+static const char str_ADD32[] PROGMEM = "ADD32";
+static const char str_SUB32[] PROGMEM = "SUB32";
+static const char str_MUL32[] PROGMEM = "MUL32";
+static const char str_DIV32[] PROGMEM = "DIV32";
+static const char str_INC32[] PROGMEM = "INC32";
+static const char str_DEC32[] PROGMEM = "DEC32";
+static const char str_PRINT32[] PROGMEM = "PRINT32";
+static const char str_IFEQ32[] PROGMEM = "IFEQ32";
+static const char str_IFNE32[] PROGMEM = "IFNE32";
+static const char str_IFGT32[] PROGMEM = "IFGT32";
+static const char str_IFLT32[] PROGMEM = "IFLT32";
+static const char str_RAND32[] PROGMEM = "RAND32";
+
+const char* const opcodeMnemonics[] PROGMEM = {
+  str_STR, str_PRINT, str_EXIT, str_JUMP, str_LET, str_DELAY,
+  str_TONE, str_CLS, str_PAUSE, str_INC, str_DEC, str_IF,
+  str_WAITKEY, str_RAND, str_LOCATE, str_PLAYNOTE, str_ADD, str_SUB,
+  str_MUL, str_DIV, str_GETBTN, str_LET16, str_INC16, str_DEC16,
+  str_ADD16, str_SUB16, str_MUL16, str_DIV16, str_PRINT16, str_IFEQ16,
+  str_IFNE16, str_IFGT16, str_IFLT16, str_RAND16,
+  str_LET32, str_ADD32, str_SUB32, str_MUL32, str_DIV32,
+  str_INC32, str_DEC32, str_PRINT32, str_IFEQ32, str_IFNE32,
+  str_IFGT32, str_IFLT32, str_RAND32
+};
+
+const uint8_t opcodeCodes[] PROGMEM = {
+  0x29, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A,
+  0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56,
+  0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60,
+  0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D
+};
+
+const uint8_t opcodeArgBytes[] PROGMEM = {
+  0, 0, 0, 2, 2, 1, 3, 0, 0, 1, 1, 4,
+  1, 2, 2, 2, 2, 2, 2, 2, 1, 3, 1, 1,
+  2, 2, 2, 2, 1, 3, 3, 3, 3, 2,
+  5, 2, 2, 2, 2, 1, 1, 1, 7, 7, 7, 7, 5
+};
+
+const bool opcodeHasString[] PROGMEM = {
+  false, true, false, false, false, false, false, false, false, false, false, false,
+  false, false, false, false, false, false, false, false, false, false, false, false,
+  false, false, false, false, false, false, false, false, false, false,
+  false, false, false, false, false, false, false, false, false, false, false, false, false
+};
+
+const uint8_t opcodeCount = sizeof(opcodeCodes) / sizeof(opcodeCodes[0]);
+
+int8_t getOpcodeIndex(uint8_t byte) {
+  for (uint8_t i = 0; i < opcodeCount; i++) {
+    if (pgm_read_byte(&opcodeCodes[i]) == byte) return i;
+  }
+  return -1;
+}
 
 void handleShort(uint8_t mask);
 void handleVeryLongAction(uint8_t mask);
@@ -126,6 +216,7 @@ void renameBackspace();
 void renameDelete();
 void renameInsert();
 void cyclicMove(uint8_t &pos, uint8_t max, bool forward);
+void insertInstruction();
 
 int strcasecmp_local(const char* a, const char* b) {
   while (*a && *b) {
@@ -201,8 +292,8 @@ char prevValidChar(char c, uint8_t pos) {
 void chooseExtensionDialog(char ext[4]) {
   static const char* exts[] = {"TXT", "OEF", "OMF"};
   uint8_t sel = 0;
-  lcd.clear(); lcd.setCursor(0,0); lcd.print("Ext: ");
-  lcd.setCursor(0,1); lcd.print("<     >  OK=3");
+  lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Ext: "));
+  lcd.setCursor(0,1); lcd.print(F("<     >  OK=3"));
   bool done = false;
   while (!done) {
     lcd.setCursor(5,0); lcd.print(exts[sel]);
@@ -247,7 +338,7 @@ void setup() {
   randomSeed(analogRead(A0));
 
   if (!rtc.begin()) {
-    lcd.setCursor(0,0); lcd.print("RTC error"); while (1);
+    lcd.setCursor(0,0); lcd.print(F("RTC error")); while (1);
   }
   if (rtc.lostPower()) rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
@@ -258,7 +349,6 @@ void setup() {
     createHiOef();
   }
   currentState = MAIN;
-  currentGreeting = random(greetCount);
   displayNeedsFullRedraw = true;
 }
 
@@ -388,9 +478,6 @@ void handleShort(uint8_t mask) {
           }
           loadBlock(currentBlock);
         }
-        // циклический переход по байтам
-        if (mask == 3) { cyclicMove(currentByte, BLOCK_SIZE, true); }
-        else if (mask == 6) { cyclicMove(currentByte, BLOCK_SIZE, false); }
       }
       playToneForMask(mask);
       break;
@@ -433,8 +520,19 @@ void handleVeryLongAction(uint8_t mask) {
       if (getCurrentExtension() == EXT_TXT) {
         if (mask == 3) { currentCharIndex--; if (currentCharIndex < 0) currentCharIndex = BLOCK_SIZE * files[currentFileIdx].sizeBlocks - 1; }
       } else {
-        if (mask == 3) { cyclicMove(currentByte, BLOCK_SIZE, true); }
+        if (mask == 2) { insertInstruction(); displayNeedsFullRedraw = true; }
+        else if (mask == 3) { cyclicMove(currentByte, BLOCK_SIZE, true); }
         else if (mask == 6) { cyclicMove(currentByte, BLOCK_SIZE, false); }
+        else if (mask == 5) {
+          if (currentBlock == files[currentFileIdx].sizeBlocks - 1 && files[currentFileIdx].sizeBlocks > 1) {
+            saveBlock(currentBlock);
+            files[currentFileIdx].sizeBlocks--;
+            saveFileTable();
+            currentBlock = files[currentFileIdx].sizeBlocks - 1;
+            loadBlock(currentBlock);
+            displayNeedsFullRedraw = true;
+          }
+        }
         displayNeedsFullRedraw = true;
       }
       playToneForMask(mask);
@@ -488,7 +586,7 @@ void redrawFullScreen() {
 void drawMainScreenFull() {
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print(greetings[currentGreeting]);
+  lcd.print(greetings);
   updateClockDisplay();
 }
 
@@ -502,50 +600,129 @@ void updateClockDisplay() {
 
 void drawDiskFull() {
   lcd.clear();
-  if (fileCount == 0) { lcd.setCursor(0,0); lcd.print("No files"); lcd.setCursor(0,1); lcd.print("1+2 to create"); return; }
-  lcd.setCursor(0,0); lcd.print(">"); lcd.print(getFileName(selectedFile));
+  if (fileCount == 0) { lcd.setCursor(0,0); lcd.print(F("No files")); lcd.setCursor(0,1); lcd.print(F("1+2 to create")); return; }
+  lcd.setCursor(0,0); lcd.print('>'); lcd.print(getFileName(selectedFile));
   lcd.setCursor(0,1);
-  if (fileCount == 1) lcd.print(" (only one)");
-  else { uint8_t next = (selectedFile + 1) % fileCount; lcd.print(" "); lcd.print(getFileName(next)); }
+  if (fileCount == 1) lcd.print(F(" (only one)"));
+  else { uint8_t next = (selectedFile + 1) % fileCount; lcd.print(' '); lcd.print(getFileName(next)); }
 }
 
 void drawEditScreenFull() {
   lcd.clear();
   if (getCurrentExtension() == EXT_TXT) {
-    lcd.setCursor(0,0); lcd.print("TXT Edit");
-    lcd.setCursor(0,1); lcd.print("Char:"); char c = getCharAt(currentCharIndex); lcd.print(c); lcd.print(" idx:"); lcd.print(currentCharIndex);
+    lcd.setCursor(0,0); lcd.print(F("TXT Edit"));
+    lcd.setCursor(0,1); lcd.print(F("Char:")); char c = getCharAt(currentCharIndex); lcd.print(c); lcd.print(F(" idx:")); lcd.print(currentCharIndex);
   } else {
-    lcd.setCursor(0,0); char line1[17]; sprintf(line1, "B:%03d C:%01d", currentBlock, currentByte); lcd.print(line1);
+    uint8_t curByte = block[currentByte];
+    int8_t idx = getOpcodeIndex(curByte);
+    char line1[17];
+    if (idx >= 0) {
+      char mnem[6];
+      strcpy_P(mnem, (const char*)pgm_read_word(&opcodeMnemonics[idx]));
+      snprintf(line1, 17, "B%03d %-5s", currentBlock, mnem);
+    } else {
+      bool isArg = false;
+      if (currentByte > 0) {
+        uint8_t prev = block[currentByte - 1];
+        int8_t prevIdx = getOpcodeIndex(prev);
+        if (prevIdx >= 0) {
+          uint8_t argBytes = pgm_read_byte(&opcodeArgBytes[prevIdx]);
+          if (argBytes > 0) {
+            uint8_t offset = 1;
+            if (prev == 0x40) offset = 2;
+            if (currentByte - offset < argBytes) {
+              isArg = true;
+            }
+          }
+        }
+      }
+      if (isArg) {
+        snprintf(line1, 17, "B%03d ARG %02X", currentBlock, curByte);
+      } else {
+        snprintf(line1, 17, "B%03d HEX %02X", currentBlock, curByte);
+      }
+    }
+    lcd.setCursor(0,0);
+    lcd.print(line1);
+
     lcd.setCursor(0,1);
-    for (int i = 0; i < BLOCK_SIZE; i++) { char hex[3]; sprintf(hex, "%02X", block[i]); lcd.print(hex); }
-    lcd.setCursor(currentByte * 2, 1); lcd.blink();
+    for (int i = 0; i < BLOCK_SIZE; i++) {
+      char hex[3];
+      sprintf(hex, "%02X", block[i]);
+      lcd.print(hex);
+    }
+    lcd.setCursor(currentByte * 2, 1);
+    lcd.blink();
   }
 }
 
-void drawSettingsFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print("Sound: "); lcd.print(soundEnabled ? "On" : "Off"); lcd.setCursor(0,1); lcd.print("1:tgl 2:erase 3:back"); }
+void insertInstruction() {
+  saveBlock(currentBlock);
+  uint8_t selected = 0;
+  bool done = false;
+  while (!done) {
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print(F("Ins: "));
+    char mnem[6];
+    strcpy_P(mnem, (const char*)pgm_read_word(&opcodeMnemonics[selected]));
+    lcd.print(mnem);
+    lcd.setCursor(0,1);
+    lcd.print(F("1-prev 2-next 3-ok"));
+    uint8_t mask = getButtonMask();
+    if (mask == 1) { if (selected > 0) selected--; else selected = opcodeCount-1; delay(150); }
+    else if (mask == 2) { if (selected < opcodeCount-1) selected++; else selected = 0; delay(150); }
+    else if (mask == 4) {
+      uint8_t code = pgm_read_byte(&opcodeCodes[selected]);
+      uint8_t argBytes = pgm_read_byte(&opcodeArgBytes[selected]);
+      if (currentByte + 1 + argBytes > BLOCK_SIZE) {
+        lcd.clear(); lcd.print(F("No space")); delay(500);
+        done = true; break;
+      }
+      block[currentByte++] = code;
+      for (uint8_t i = 0; i < argBytes; i++) {
+        if (currentByte < BLOCK_SIZE) block[currentByte++] = 0x00;
+      }
+      if (code == 0x40) {
+        if (currentByte < BLOCK_SIZE) block[currentByte++] = 0x29;
+        for (uint8_t i = 0; i < 8 && currentByte < BLOCK_SIZE; i++) {
+          block[currentByte++] = ' ';
+        }
+        block[currentByte++] = 0x00;
+      }
+      if (currentByte >= BLOCK_SIZE) currentByte = BLOCK_SIZE - 1;
+      saveBlock(currentBlock);
+      done = true;
+      displayNeedsFullRedraw = true;
+    }
+    delay(50);
+  }
+}
 
-void drawProgramsFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print("Built-in progs"); lcd.setCursor(0,1); lcd.print("(coming soon)"); }
-void drawViewerFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print("View:"); lcd.print(getFileName(currentFileIdx)); lcd.setCursor(0,1); lcd.print("1/2-pg 3-exit"); }
-void drawPlayerFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print("Playing:"); lcd.print(getFileName(currentFileIdx)); lcd.setCursor(0,1); lcd.print("any key to stop"); }
+void drawSettingsFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Sound: ")); lcd.print(soundEnabled ? F("On") : F("Off")); lcd.setCursor(0,1); lcd.print(F("1:tgl 2:erase 3:back")); }
+
+void drawProgramsFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Built-in progs")); lcd.setCursor(0,1); lcd.print(F("(coming soon)")); }
+void drawViewerFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("View:")); lcd.print(getFileName(currentFileIdx)); lcd.setCursor(0,1); lcd.print(F("1/2-pg 3-exit")); }
+void drawPlayerFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Playing:")); lcd.print(getFileName(currentFileIdx)); lcd.setCursor(0,1); lcd.print(F("any key to stop")); }
 
 void drawRenameFull() {
   lcd.clear();
-  lcd.setCursor(0,0); lcd.print("Rename:");
+  lcd.setCursor(0,0); lcd.print(F("Rename:"));
   lcd.setCursor(0,1); lcd.print(renameBuffer);
   lcd.setCursor(renamePos, 1); lcd.blink();
 }
 
-void drawRunOefFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print("Running:"); lcd.print(getFileName(currentFileIdx)); lcd.setCursor(0,1); lcd.print("(1+2+3 to stop)"); }
+void drawRunOefFull() { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Running:")); lcd.print(getFileName(currentFileIdx)); lcd.setCursor(0,1); lcd.print(F("(1+2+3 to stop)")); }
 
 void drawContextMenuFull() {
   lcd.clear();
-  lcd.setCursor(0,0); lcd.print("Context Menu:");
+  lcd.setCursor(0,0); lcd.print(F("Context Menu:"));
   lcd.setCursor(0,1); lcd.print(contextItems[contextMenuIndex]);
 }
 
 void drawInfoScreenFull() {
   lcd.clear();
-  lcd.setCursor(0,0); lcd.print("OrangeOS v1.00");
+  lcd.setCursor(0,0); lcd.print(F("OrangeOS v1.00"));
   uint16_t usedBlocks = 0;
   for (uint8_t i = 0; i < fileCount; i++) usedBlocks += files[i].sizeBlocks;
   uint16_t freeBytes = (EEPROM_SIZE / BLOCK_SIZE - DATA_START_BLOCK - usedBlocks) * BLOCK_SIZE;
@@ -584,11 +761,11 @@ void fileInfo() {
 }
 
 void createFile() {
-  if (fileCount >= MAX_FILES) { lcd.clear(); lcd.setCursor(0,0); lcd.print("Max files"); delay(1000); return; }
+  if (fileCount >= MAX_FILES) { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Max files")); delay(1000); return; }
   char ext[4]; chooseExtensionDialog(ext);
   char newName[FULLNAME_LEN+1]; snprintf(newName, FULLNAME_LEN+1, "NEWFILE.%s", ext);
   uint16_t start = findFreeBlock();
-  if (start == 0xFFFF) { lcd.clear(); lcd.setCursor(0,0); lcd.print("Disk full!"); delay(1000); return; }
+  if (start == 0xFFFF) { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Disk full!")); delay(1000); return; }
   files[fileCount].startBlock = start;
   files[fileCount].sizeBlocks = 1;
   files[fileCount].flags = (strcmp(ext, "OEF") == 0) ? 0x01 : 0x00;
@@ -597,7 +774,7 @@ void createFile() {
   for (int i = 0; i < BLOCK_SIZE; i++) writeEEPROM(start * BLOCK_SIZE + i, 0x00);
   saveFileTable();
   selectedFile = fileCount - 1;
-  lcd.clear(); lcd.setCursor(0,0); lcd.print("Created"); delay(500);
+  lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Created")); delay(500);
   displayNeedsFullRedraw = true;
 }
 
@@ -607,7 +784,7 @@ void deleteFile() {
   fileCount--;
   saveFileTable();
   if (selectedFile >= fileCount) selectedFile = fileCount - 1;
-  lcd.clear(); lcd.setCursor(0,0); lcd.print("Deleted"); delay(500);
+  lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Deleted")); delay(500);
   displayNeedsFullRedraw = true;
 }
 
@@ -627,22 +804,25 @@ void buildProgram() {
     }
     if (!ok) break;
   }
-  if (ok) { files[currentFileIdx].flags |= 0x01; saveFileTable(); lcd.clear(); lcd.setCursor(0,0); lcd.print("Build OK!"); }
-  else { files[currentFileIdx].flags &= ~0x01; saveFileTable(); lcd.clear(); lcd.setCursor(0,0); lcd.print("Build ERR!"); }
+  if (ok) { files[currentFileIdx].flags |= 0x01; saveFileTable(); lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Build OK!")); }
+  else { files[currentFileIdx].flags &= ~0x01; saveFileTable(); lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Build ERR!")); }
   delay(1000); displayNeedsFullRedraw = true;
 }
 
 void eraseDisk() {
   for (int i = 0; i < EEPROM_SIZE; i++) writeEEPROM(i, 0xFF);
   fileCount = 0; saveFileTable();
-  lcd.clear(); lcd.setCursor(0,0); lcd.print("Erased!"); delay(1000);
+  lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Erased!")); delay(1000);
   currentState = MAIN; displayNeedsFullRedraw = true;
 }
 
 void viewerPrevPage() {} void viewerNextPage() {} void viewerPrevLine() {} void viewerNextLine() {}
 
 void startOEF() {
-  pc = 0; memset(vars, 0, sizeof(vars));
+  pc = 0;
+  memset(vars8, 0, sizeof(vars8));
+  memset(vars16, 0, sizeof(vars16));
+  memset(vars32, 0, sizeof(vars32));
   oefRunning = true; oefPaused = false; oefDelayUntil = 0;
   currentState = RUN_OEF; displayNeedsFullRedraw = true;
 }
@@ -658,11 +838,11 @@ void executeOneInstruction() {
         pc++;
         lcd.clear();
         lcd.setCursor(0, 0);
-        while (true) {
+        while (1) {
           uint8_t ch = readEEPROM(addr + pc);
           if (ch == 0x00) break;
           if (ch >= 0x60 && ch <= 0x7F) {
-            int8_t val = vars[ch - 0x60];
+            int8_t val = vars8[ch - 0x60];
             char buf[5];
             sprintf(buf, "%d", val);
             lcd.print(buf);
@@ -680,24 +860,114 @@ void executeOneInstruction() {
     case 0x44: { uint8_t d = readEEPROM(addr + pc); pc++; oefDelayUntil = millis() + d * 100; break; }
     case 0x47: oefPaused = true; break;
     case 0x42: pc = readEEPROM(addr + pc); break;
-    case 0x43: { uint8_t var = readEEPROM(addr + pc)-0x60; pc++; int8_t val = (int8_t)readEEPROM(addr + pc); pc++; if(var<32) vars[var]=val; break; }
-    case 0x48: { uint8_t var = readEEPROM(addr + pc)-0x60; pc++; if(var<32) vars[var]++; break; }
-    case 0x49: { uint8_t var = readEEPROM(addr + pc)-0x60; pc++; if(var<32) vars[var]--; break; }
+    case 0x43: { uint8_t var = readEEPROM(addr + pc) - 0x60; pc++; int8_t val = (int8_t)readEEPROM(addr + pc); pc++; if(var < 32) vars8[var] = val; break; }
+    case 0x48: { uint8_t var = readEEPROM(addr + pc) - 0x60; pc++; if(var < 32) vars8[var]++; break; }
+    case 0x49: { uint8_t var = readEEPROM(addr + pc) - 0x60; pc++; if(var < 32) vars8[var]--; break; }
     case 0x4A: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; uint8_t cond = readEEPROM(addr+pc); pc++; int8_t val = (int8_t)readEEPROM(addr+pc); pc++;
       uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2;
-      if (var>=32) break; bool res=false; int8_t v=vars[var];
-      if (cond==0x3A) res=(v==val); else if(cond==0x3B) res=(v!=val); else if(cond==0x3C) res=(v<val); else if(cond==0x3D) res=(v>val); else if(cond==0x3E) res=(v<=val); else if(cond==0x3F) res=(v>=val);
-      if (res) pc=jumpAddr; break; }
-    case 0x4B: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; if(var<32) { while(true) { uint8_t m=getButtonMask(); if(m!=0) { while(getButtonMask()!=0) delay(10); vars[var]=m; break; } delay(10); } } break; }
-    case 0x45: { uint16_t freq = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint8_t dur = readEEPROM(addr+pc); pc++; if(soundEnabled) tone(BUZZER, freq, dur*10); oefDelayUntil=millis()+dur*10; break; }
-    case 0x4C: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; uint8_t max = readEEPROM(addr+pc); pc++; if(var<32 && max>0) vars[var] = random(max); break; }
+      if (var >= 32) break; bool res = false; int8_t v = vars8[var];
+      if (cond == 0x3A) res = (v == val); else if(cond == 0x3B) res = (v != val); else if(cond == 0x3C) res = (v < val); else if(cond == 0x3D) res = (v > val); else if(cond == 0x3E) res = (v <= val); else if(cond == 0x3F) res = (v >= val);
+      if (res) pc = jumpAddr; break; }
+    case 0x4B: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; if(var < 32) { while(1) { uint8_t m = getButtonMask(); if(m != 0) { while(getButtonMask() != 0) delay(10); vars8[var] = m; break; } delay(10); } } break; }
+    case 0x45: { uint16_t freq = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint8_t dur = readEEPROM(addr+pc); pc++; if(soundEnabled) tone(BUZZER, freq, dur*10); oefDelayUntil = millis() + dur*10; break; }
+    case 0x4C: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; uint8_t max = readEEPROM(addr+pc); pc++; if(var < 32 && max > 0) vars8[var] = random(max); break; }
     case 0x4D: { uint8_t col = readEEPROM(addr+pc); pc++; uint8_t row = readEEPROM(addr+pc); pc++; lcd.setCursor(col & 0x0F, row & 0x01); break; }
     case 0x4E: { uint8_t note = readEEPROM(addr+pc); pc++; uint8_t dur = readEEPROM(addr+pc); pc++; if (soundEnabled) tone(BUZZER, noteToFreq(note), dur*50); oefDelayUntil = millis() + dur*50; break; }
-    case 0x4F: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1<32) { if(var2>=0x60 && var2<0x80) vars[var1]+=vars[var2-0x60]; else vars[var1]+=(int8_t)var2; } break; }
-    case 0x50: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1<32) { if(var2>=0x60 && var2<0x80) vars[var1]-=vars[var2-0x60]; else vars[var1]-=(int8_t)var2; } break; }
-    case 0x51: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1<32) { int8_t v2=(var2>=0x60 && var2<0x80)?vars[var2-0x60]:(int8_t)var2; vars[var1]=vars[var1]*v2; } break; }
-    case 0x52: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1<32) { int8_t v2=(var2>=0x60 && var2<0x80)?vars[var2-0x60]:(int8_t)var2; if(v2!=0) vars[var1]=vars[var1]/v2; } break; }
-    case 0x53: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; if(var<32) vars[var] = getButtonMask(); break; }
+    case 0x4F: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1 < 32) { if(var2 >= 0x60 && var2 < 0x80) vars8[var1] += vars8[var2-0x60]; else vars8[var1] += (int8_t)var2; } break; }
+    case 0x50: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1 < 32) { if(var2 >= 0x60 && var2 < 0x80) vars8[var1] -= vars8[var2-0x60]; else vars8[var1] -= (int8_t)var2; } break; }
+    case 0x51: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1 < 32) { int8_t v2 = (var2 >= 0x60 && var2 < 0x80) ? vars8[var2-0x60] : (int8_t)var2; vars8[var1] *= v2; } break; }
+    case 0x52: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1 < 32) { int8_t v2 = (var2 >= 0x60 && var2 < 0x80) ? vars8[var2-0x60] : (int8_t)var2; if(v2 != 0) vars8[var1] /= v2; } break; }
+    case 0x53: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; if(var < 32) vars8[var] = getButtonMask(); break; }
+    case 0x54: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair < 8) vars16[pair] = val; break; }
+    case 0x55: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; if(pair < 8) vars16[pair]++; break; }
+    case 0x56: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; if(pair < 8) vars16[pair]--; break; }
+    case 0x57: { uint8_t pairA = readEEPROM(addr+pc)-0x60; pc++; uint8_t pairB = readEEPROM(addr+pc)-0x60; pc++; if(pairA < 8 && pairB < 8) vars16[pairA] += vars16[pairB]; break; }
+    case 0x58: { uint8_t pairA = readEEPROM(addr+pc)-0x60; pc++; uint8_t pairB = readEEPROM(addr+pc)-0x60; pc++; if(pairA < 8 && pairB < 8) vars16[pairA] -= vars16[pairB]; break; }
+    case 0x59: { uint8_t pairA = readEEPROM(addr+pc)-0x60; pc++; uint8_t pairB = readEEPROM(addr+pc)-0x60; pc++; if(pairA < 8 && pairB < 8) vars16[pairA] *= vars16[pairB]; break; }
+    case 0x5A: { uint8_t pairA = readEEPROM(addr+pc)-0x60; pc++; uint8_t pairB = readEEPROM(addr+pc)-0x60; pc++; if(pairA < 8 && pairB < 8) { if(vars16[pairB] != 0) vars16[pairA] /= vars16[pairB]; } break; }
+    case 0x5B: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; if(pair < 8) { lcd.print(vars16[pair]); oefDelayUntil = millis() + 1000; } break; }
+    case 0x5C: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair < 8 && vars16[pair] == val) pc = jumpAddr; break; }
+    case 0x5D: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair < 8 && vars16[pair] != val) pc = jumpAddr; break; }
+    case 0x5E: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair < 8 && vars16[pair] > val) pc = jumpAddr; break; }
+    case 0x5F: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair < 8 && vars16[pair] < val) pc = jumpAddr; break; }
+    case 0x60: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t maxVal = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair < 8 && maxVal > 0) vars16[pair] = random(maxVal); break; }
+    // 32-bit instructions
+    case 0x61: { // LET32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24);
+      pc += 4;
+      if(var < 16) vars32[var] = val;
+      break; }
+    case 0x62: { // ADD32
+      uint8_t varA = readEEPROM(addr+pc) - 0x80; pc++;
+      uint8_t varB = readEEPROM(addr+pc) - 0x80; pc++;
+      if(varA < 16 && varB < 16) vars32[varA] += vars32[varB];
+      break; }
+    case 0x63: { // SUB32
+      uint8_t varA = readEEPROM(addr+pc) - 0x80; pc++;
+      uint8_t varB = readEEPROM(addr+pc) - 0x80; pc++;
+      if(varA < 16 && varB < 16) vars32[varA] -= vars32[varB];
+      break; }
+    case 0x64: { // MUL32
+      uint8_t varA = readEEPROM(addr+pc) - 0x80; pc++;
+      uint8_t varB = readEEPROM(addr+pc) - 0x80; pc++;
+      if(varA < 16 && varB < 16) vars32[varA] *= vars32[varB];
+      break; }
+    case 0x65: { // DIV32
+      uint8_t varA = readEEPROM(addr+pc) - 0x80; pc++;
+      uint8_t varB = readEEPROM(addr+pc) - 0x80; pc++;
+      if(varA < 16 && varB < 16 && vars32[varB] != 0) vars32[varA] /= vars32[varB];
+      break; }
+    case 0x66: { // INC32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      if(var < 16) vars32[var]++;
+      break; }
+    case 0x67: { // DEC32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      if(var < 16) vars32[var]--;
+      break; }
+    case 0x68: { // PRINT32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      if(var < 16) { lcd.print(vars32[var]); oefDelayUntil = millis() + 1000; }
+      break; }
+    case 0x69: { // IFEQ32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24);
+      pc += 4;
+      uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8);
+      pc += 2;
+      if(var < 16 && vars32[var] == val) pc = jumpAddr;
+      break; }
+    case 0x6A: { // IFNE32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24);
+      pc += 4;
+      uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8);
+      pc += 2;
+      if(var < 16 && vars32[var] != val) pc = jumpAddr;
+      break; }
+    case 0x6B: { // IFGT32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24);
+      pc += 4;
+      uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8);
+      pc += 2;
+      if(var < 16 && vars32[var] > val) pc = jumpAddr;
+      break; }
+    case 0x6C: { // IFLT32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24);
+      pc += 4;
+      uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8);
+      pc += 2;
+      if(var < 16 && vars32[var] < val) pc = jumpAddr;
+      break; }
+    case 0x6D: { // RAND32
+      uint8_t var = readEEPROM(addr+pc) - 0x80; pc++;
+      uint32_t maxVal = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24);
+      pc += 4;
+      if(var < 16 && maxVal > 0) vars32[var] = random(maxVal);
+      break; }
   }
 }
 void playOMF() {
@@ -732,7 +1002,7 @@ void renameDelete() {
 }
 
 void renameInsert() {
-  if (renameBuffer[FULLNAME_LEN - 1] != ' ') return; // нет места
+  if (renameBuffer[FULLNAME_LEN - 1] != ' ') return;
   for (uint8_t i = FULLNAME_LEN - 1; i > renamePos; i--) {
     renameBuffer[i] = renameBuffer[i - 1];
   }
