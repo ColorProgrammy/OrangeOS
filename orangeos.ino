@@ -17,11 +17,9 @@
 #define EXT_LEN 3
 #define FULLNAME_LEN 13
 #define BLOCK_SIZE 8
-#define FLAG_DIR 0x80
-#define ROOT 0xFF
-#define FS_MAGIC 0x5A
-#define INT_DATA_START_BLOCK ((MAX_FILES_INT * (FULLNAME_LEN + 5) + BLOCK_SIZE - 1) / BLOCK_SIZE)
-#define EXT_DATA_START_BLOCK ((MAX_FILES_EXT * (FULLNAME_LEN + 5) + BLOCK_SIZE - 1) / BLOCK_SIZE)
+#define FILE_ENTRY_SIZE (FULLNAME_LEN + 5)
+#define INT_DATA_START_BLOCK ((MAX_FILES_INT * FILE_ENTRY_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE)
+#define EXT_DATA_START_BLOCK ((MAX_FILES_EXT * FILE_ENTRY_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE)
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 RTC_DS3231 rtc;
@@ -43,13 +41,11 @@ struct FileEntry {
   uint16_t startBlock;
   uint8_t sizeBlocks;
   uint8_t flags;
-  uint8_t parent;
 };
 
 uint8_t selectedFile = 0;
 uint8_t currentDisk = 0;
 uint8_t currentFileIdx = 255;
-uint8_t currentDir = ROOT;
 uint8_t renameTarget = 255;
 uint8_t taskmanIndex = 0;
 uint16_t currentBlock = 0;
@@ -78,7 +74,6 @@ const char* greetings[] = {"Welcome!", "Home Sweet Home", "Hello User", "OrangeO
 const uint8_t greetCount = 5;
 uint8_t currentGreeting = 0;
 
-// Settings menu
 #define SETTINGS_ITEMS 5
 const char* settingsItems[] = {"Sound", "Set Time", "Erase Data", "System Info", "Back"};
 uint8_t settingsIndex = 0;
@@ -101,9 +96,6 @@ void drawRunOefFull();
 void drawContextMenuFull();
 void drawInfoScreenFull();
 void drawTaskmanFull();
-bool getVisibleEntry(uint8_t pos, uint8_t* flatIdx);
-uint8_t getDirCount();
-bool resolveSelected(uint8_t* flat);
 uint8_t getAppCount();
 uint8_t getAppFile(uint8_t pos);
 void readOnlyMsg();
@@ -158,6 +150,16 @@ void print3(uint16_t v);
 void printHex2(uint8_t v);
 void printHex4(uint16_t v);
 void printBlockTag(uint16_t b, const __FlashStringHelper* tag);
+uint8_t getFileCount();
+uint16_t getUsedBytes();
+uint16_t getFreeBytes();
+bool isSystemDisk();
+void readFileEntry(uint8_t idx, FileEntry* entry);
+void writeFileEntry(uint8_t idx, const FileEntry* entry);
+bool isFreeEntry(uint8_t idx);
+void clearFileEntry(uint8_t idx);
+void deleteFileEntry(uint8_t idx);
+bool resolveSelected(uint8_t* flat);
 
 enum SyscallId {
     SYS_PRINT_STR = 1,
@@ -202,10 +204,6 @@ enum SyscallId {
     SYS_OPEN_SETTINGS,
     SYS_SHOW_RAM,
     SYS_SHOW_UPTIME,
-    SYS_MKDIR,
-    SYS_CHDIR,
-    SYS_LS,
-    SYS_CD_ROOT,
     SYS_SHOW_TASKS,
 };
 
@@ -249,8 +247,7 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
             uint8_t idx = args[0];
             if (idx < getMaxFiles()) {
                 FileEntry e; readFileEntry(idx, &e);
-                if (e.flags & FLAG_DIR) *(uint16_t*)(&args[1]) = 0;
-                else *(uint16_t*)(&args[1]) = e.sizeBlocks * BLOCK_SIZE;
+                *(uint16_t*)(&args[1]) = e.sizeBlocks * BLOCK_SIZE;
             } else *(uint16_t*)(&args[1]) = 0;
         } break;
         case SYS_GET_FILE_FLAGS: if (args) {
@@ -265,7 +262,6 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
             uint16_t pos = *(uint16_t*)(&args[1]);
             if (idx < getMaxFiles()) {
                 FileEntry e; readFileEntry(idx, &e);
-                if (e.flags & FLAG_DIR) break;
                 uint16_t addr = e.startBlock * BLOCK_SIZE + pos;
                 args[3] = readEEPROM(addr);
             } else args[3] = 0xFF;
@@ -277,7 +273,6 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
             uint8_t byte = args[3];
             if (idx < getMaxFiles()) {
                 FileEntry e; readFileEntry(idx, &e);
-                if (e.flags & FLAG_DIR) break;
                 uint16_t addr = e.startBlock * BLOCK_SIZE + pos;
                 writeEEPROM(addr, byte);
             }
@@ -286,11 +281,8 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
             if (isSystemDisk()) break;
             char* name = (char*)args;
             uint8_t blocks = args[strlen(name) + 1];
-            uint8_t idx = 0xFF;
-            for (uint8_t i = 0; i < getMaxFiles(); i++) {
-                if (isFreeEntry(i)) { idx = i; break; }
-            }
-            if (idx != 0xFF) {
+            uint8_t idx = getFileCount();
+            if (idx < getMaxFiles()) {
                 uint16_t start = findFreeBlock();
                 if (start != 0xFFFF) {
                     FileEntry e;
@@ -300,7 +292,6 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
                     e.startBlock = start;
                     e.sizeBlocks = blocks;
                     e.flags = (strstr(name, ".OEF") ? 0x01 : 0x00);
-                    e.parent = ROOT;
                     writeFileEntry(idx, &e);
                     for (uint16_t i = 0; i < blocks * BLOCK_SIZE; i++)
                         writeEEPROM(start * BLOCK_SIZE + i, 0x00);
@@ -311,10 +302,8 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
         case SYS_DELETE_FILE: if (args) {
             if (isSystemDisk()) break;
             uint8_t idx = args[0];
-            if (idx < getMaxFiles()) {
-                FileEntry e; readFileEntry(idx, &e);
-                if (e.flags & FLAG_DIR) break;
-                clearFileEntry(idx);
+            if (idx < getFileCount()) {
+                deleteFileEntry(idx);
             }
         } break;
         case SYS_RENAME_FILE: if (args) {
@@ -323,7 +312,6 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
             char* newName = (char*)&args[1];
             if (idx < getMaxFiles()) {
                 FileEntry e; readFileEntry(idx, &e);
-                if (e.flags & FLAG_DIR) break;
                 strncpy(e.name, newName, FULLNAME_LEN);
                 e.name[FULLNAME_LEN] = 0;
                 writeFileEntry(idx, &e);
@@ -333,7 +321,6 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
             uint8_t idx = args[0];
             if (idx < getMaxFiles()) {
                 FileEntry e; readFileEntry(idx, &e);
-                if (e.flags & FLAG_DIR) break;
                 currentFileIdx = idx;
                 startOEF();
             }
@@ -384,58 +371,10 @@ void syscall(uint8_t id, uint8_t* args, uint8_t argCount) {
             *(uint16_t*)(&args[1]) = getUsedBytes();
             currentDisk = oldDisk;
         } break;
-        case SYS_MKDIR: if (args) {
-            if (isSystemDisk()) break;
-            char* name = (char*)args;
-            uint8_t idx = 0xFF;
-            for (uint8_t i = 0; i < getMaxFiles(); i++) {
-                if (isFreeEntry(i)) { idx = i; break; }
-            }
-            if (idx != 0xFF) {
-                FileEntry e;
-                memset(e.name, ' ', FULLNAME_LEN);
-                strncpy(e.name, name, FULLNAME_LEN);
-                e.name[FULLNAME_LEN] = 0;
-                e.startBlock = 0xFFFF;
-                e.sizeBlocks = 0;
-                e.flags = FLAG_DIR;
-                e.parent = currentDir;
-                writeFileEntry(idx, &e);
-            }
-            args[0] = idx;
-        } break;
-        case SYS_CHDIR: if (args) {
-            int8_t dir = args[0];
-            if (dir < 0) { currentDir = ROOT; break; }
-            if (dir < getMaxFiles()) {
-                FileEntry e; readFileEntry(dir, &e);
-                if (e.flags & FLAG_DIR) currentDir = dir;
-            }
-        } break;
-        case SYS_LS: if (args) {
-            uint8_t pos = 0;
-            args[1] = 0;
-            if (currentDir != ROOT) {
-                if (pos == args[0]) { strcpy((char*)&args[2], ".."); args[1] = 1; break; }
-                pos++;
-            }
-            for (uint8_t i = 0; i < getMaxFiles() && !args[1]; i++) {
-                if (isFreeEntry(i)) continue;
-                FileEntry e; readFileEntry(i, &e);
-                if (e.parent != currentDir) continue;
-                if (pos == args[0]) {
-                    strcpy((char*)&args[2], getFileName(i));
-                    args[1] = e.flags & FLAG_DIR ? 1 : 0;
-                }
-                pos++;
-            }
-        } break;
-        case SYS_CD_ROOT: currentDir = ROOT; break;
         case SYS_SHOW_TASKS: {
             oefRunning = false; oefPaused = false;
             currentDisk = 0;
-            currentDir = ROOT;
-            taskmanIndex = 0;
+              taskmanIndex = 0;
             currentState = TASKMAN; displayNeedsFullRedraw = true;
         } break;
         case SYS_SHOW_INFO: showSystemInfo(); break;
@@ -547,113 +486,62 @@ uint16_t getDataStartBlock() {
 uint16_t getEepromSize() {
   return (currentDisk == 0) ? INT_EEPROM_SIZE : EXT_EEPROM_SIZE;
 }
-
 void readFileEntry(uint8_t idx, FileEntry* entry) {
-  uint16_t addr = FILE_TABLE_START + idx * (FULLNAME_LEN + 5);
-  for (uint8_t i = 0; i < FULLNAME_LEN; i++) entry->name[i] = readEEPROM(addr + i);
+  uint16_t addr = FILE_TABLE_START + idx * FILE_ENTRY_SIZE;
+  for (uint8_t i = 0; i < FULLNAME_LEN; i++) {
+    entry->name[i] = readEEPROM(addr + i);
+  }
   entry->name[FULLNAME_LEN] = 0;
-  entry->startBlock = readEEPROM(addr + FULLNAME_LEN) | (readEEPROM(addr + FULLNAME_LEN + 1) << 8);
+  entry->startBlock = readEEPROM(addr + FULLNAME_LEN) |
+                      (readEEPROM(addr + FULLNAME_LEN + 1) << 8);
   entry->sizeBlocks = readEEPROM(addr + FULLNAME_LEN + 2);
   entry->flags = readEEPROM(addr + FULLNAME_LEN + 3);
-  entry->parent = readEEPROM(addr + FULLNAME_LEN + 4);
 }
-
 void writeFileEntry(uint8_t idx, const FileEntry* entry) {
-  uint16_t addr = FILE_TABLE_START + idx * (FULLNAME_LEN + 5);
-  for (uint8_t i = 0; i < FULLNAME_LEN; i++) writeEEPROM(addr + i, entry->name[i]);
+  uint16_t addr = FILE_TABLE_START + idx * FILE_ENTRY_SIZE;
+  for (uint8_t i = 0; i < FULLNAME_LEN; i++) {
+    writeEEPROM(addr + i, entry->name[i]);
+  }
   writeEEPROM(addr + FULLNAME_LEN, entry->startBlock & 0xFF);
   writeEEPROM(addr + FULLNAME_LEN + 1, entry->startBlock >> 8);
   writeEEPROM(addr + FULLNAME_LEN + 2, entry->sizeBlocks);
   writeEEPROM(addr + FULLNAME_LEN + 3, entry->flags);
-  writeEEPROM(addr + FULLNAME_LEN + 4, entry->parent);
+  writeEEPROM(addr + FULLNAME_LEN + 4, 0x00);
 }
-
 uint8_t getFileCount() {
   uint8_t count = 0;
   uint8_t max = getMaxFiles();
   for (uint8_t i = 0; i < max; i++) {
-    if (readEEPROM(FILE_TABLE_START + i * (FULLNAME_LEN + 5)) != 0xFF) count++;
+    if (readEEPROM(FILE_TABLE_START + i * FILE_ENTRY_SIZE) == 0xFF) break;
+    count++;
   }
   return count;
 }
-
 bool isFreeEntry(uint8_t idx) {
-  return readEEPROM(FILE_TABLE_START + idx * (FULLNAME_LEN + 5)) == 0xFF;
+  if (idx >= getMaxFiles()) return true;
+  return readEEPROM(FILE_TABLE_START + idx * FILE_ENTRY_SIZE) == 0xFF;
 }
-
 uint16_t getUsedBytes() {
   uint16_t used = 0;
-  for (uint8_t i = 0; i < getMaxFiles(); i++) {
-    if (isFreeEntry(i)) continue;
-    FileEntry e; readFileEntry(i, &e);
-    if (e.flags & FLAG_DIR) continue;
+  uint8_t count = getFileCount();
+  for (uint8_t i = 0; i < count; i++) {
+    FileEntry e;
+    readFileEntry(i, &e);
     used += e.sizeBlocks * BLOCK_SIZE;
   }
   return used;
 }
-
 uint16_t getFreeBytes() {
-  uint16_t total = (getEepromSize() / BLOCK_SIZE - 1 - getDataStartBlock()) * BLOCK_SIZE;
+  uint16_t total = (getEepromSize() / BLOCK_SIZE - getDataStartBlock()) * BLOCK_SIZE;
   uint16_t used = getUsedBytes();
   return (used > total) ? 0 : (total - used);
 }
 
-uint16_t getFsMagicAddr() {
-  return getEepromSize() - 1;
-}
-
-void writeDirEntry(const char* name, uint8_t idx) {
-  FileEntry e;
-  memset(e.name, ' ', FULLNAME_LEN);
-  strncpy(e.name, name, FULLNAME_LEN);
-  e.name[FULLNAME_LEN] = 0;
-  e.startBlock = 0xFFFF;
-  e.sizeBlocks = 0;
-  e.flags = FLAG_DIR;
-  e.parent = ROOT;
-  writeFileEntry(idx, &e);
-}
-
 void initDiskLayout() {
-  writeEEPROM(getFsMagicAddr(), FS_MAGIC);
-  uint8_t idx = 0;
-  writeDirEntry("SYSTEM", idx++);
-  writeDirEntry("APPS", idx++);
-  writeDirEntry("USER", idx++);
+  for (uint8_t i = 0; i < getMaxFiles(); i++) clearFileEntry(i);
   createDefaultFile();
   createHelloOef();
   createHiOef();
-}
-
-uint8_t getVisibleCount(uint8_t parent) {
-  uint8_t c = 0;
-  for (uint8_t i = 0; i < getMaxFiles(); i++) {
-    if (isFreeEntry(i)) continue;
-    FileEntry e; readFileEntry(i, &e);
-    if (e.parent == parent) c++;
-  }
-  return c;
-}
-
-uint8_t getDirCount() {
-  return getVisibleCount(currentDir) + (currentDir != ROOT ? 1 : 0);
-}
-
-bool getVisibleEntry(uint8_t pos, uint8_t* flatIdx) {
-  if (currentDir != ROOT) {
-    if (pos == 0) return false;
-    pos--;
-  }
-  uint8_t seen = 0;
-  for (uint8_t i = 0; i < getMaxFiles(); i++) {
-    if (isFreeEntry(i)) continue;
-    FileEntry e; readFileEntry(i, &e);
-    if (e.parent == currentDir) {
-      if (seen == pos) { *flatIdx = i; return true; }
-      seen++;
-    }
-  }
-  return false;
 }
 
 bool isSystemDisk() { return currentDisk == 0; }
@@ -662,10 +550,20 @@ void readOnlyMsg() {
   lcd.clear(); lcd.setCursor(0,0); lcd.print(F("C: read only"));
   delay(700); displayNeedsFullRedraw = true;
 }
-
 void clearFileEntry(uint8_t idx) {
-  uint16_t addr = FILE_TABLE_START + idx * (FULLNAME_LEN + 5);
-  for (uint8_t i = 0; i < FULLNAME_LEN + 5; i++) writeEEPROM(addr + i, 0xFF);
+  uint16_t addr = FILE_TABLE_START + idx * FILE_ENTRY_SIZE;
+  for (uint8_t i = 0; i < FILE_ENTRY_SIZE; i++) writeEEPROM(addr + i, 0xFF);
+}
+
+void deleteFileEntry(uint8_t idx) {
+  uint8_t count = getFileCount();
+  if (idx >= count) return;
+  for (uint8_t i = idx; i + 1 < count; i++) {
+    FileEntry e;
+    readFileEntry(i + 1, &e);
+    writeFileEntry(i, &e);
+  }
+  clearFileEntry(count - 1);
 }
 
 int strcasecmp_local(const char* a, const char* b) {
@@ -762,17 +660,19 @@ void chooseExtensionDialog(char ext[4]) {
   }
   strcpy(ext, exts[sel]);
 }
-
 uint16_t findFreeBlock() {
   uint16_t maxBlocks = getEepromSize() / BLOCK_SIZE;
   uint16_t start = getDataStartBlock();
-  for (uint16_t i = start; i < maxBlocks - 1; i++) {
+  uint8_t count = getFileCount();
+  for (uint16_t i = start; i < maxBlocks; i++) {
     bool used = false;
-    for (uint8_t j = 0; j < getMaxFiles(); j++) {
-      if (isFreeEntry(j)) continue;
-      FileEntry e; readFileEntry(j, &e);
-      if (e.flags & FLAG_DIR) continue;
-      if (i >= e.startBlock && i < e.startBlock + e.sizeBlocks) { used = true; break; }
+    for (uint8_t j = 0; j < count; j++) {
+      FileEntry e;
+      readFileEntry(j, &e);
+      if (i >= e.startBlock && i < e.startBlock + e.sizeBlocks) {
+        used = true;
+        break;
+      }
     }
     if (!used) return i;
   }
@@ -884,8 +784,14 @@ void setup() {
   pinMode(BTN2, INPUT_PULLUP);
   pinMode(BTN3, INPUT_PULLUP);
   pinMode(BUZZER, OUTPUT);
-  lcd.init(); lcd.backlight();
   Wire.begin();
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Booting..."));
+  lcd.display();
+  delay(300);
   randomSeed(analogRead(A0));
 
   if (!rtc.begin()) {
@@ -902,9 +808,7 @@ void setup() {
     createBuiltinFiles();
   }
   currentDisk = 1;
-  if (readEEPROM(getFsMagicAddr()) != FS_MAGIC) {
-    initDiskLayout();
-  }
+  if (getFileCount() == 0) initDiskLayout();
 
   currentState = MAIN;
   currentGreeting = random(greetCount);
@@ -1000,7 +904,7 @@ void handleShort(uint8_t mask) {
       if (mask == 3 || mask == 4 || mask == 7) { currentState = MAIN; displayNeedsFullRedraw = true; }
       break;
     case DISK: {
-      uint8_t total = getDirCount();
+      uint8_t total = getFileCount();
       if (total == 0) {
         if (mask == 3) createFile();
         break;
@@ -1009,8 +913,15 @@ void handleShort(uint8_t mask) {
       else if (mask == 2) editFile();
       else if (mask == 4) fileInfo();
       else if (mask == 3) createFile();
-      else if (mask == 5) { if (selectedFile > 0) selectedFile--; else selectedFile = total - 1; displayNeedsFullRedraw = true; }
-      else if (mask == 6) { if (selectedFile < total - 1) selectedFile++; else selectedFile = 0; displayNeedsFullRedraw = true; }
+      else if (mask == 5) {
+        if (selectedFile > 0) selectedFile--;
+        else selectedFile = total - 1;
+        displayNeedsFullRedraw = true;
+      } else if (mask == 6) {
+        if (selectedFile < total - 1) selectedFile++;
+        else selectedFile = 0;
+        displayNeedsFullRedraw = true;
+      }
       break;
     }
     case TASKMAN: {
@@ -1020,7 +931,6 @@ void handleShort(uint8_t mask) {
         uint8_t flat = getAppFile(taskmanIndex);
         if (flat != 255) {
           currentDisk = 0;
-          currentDir = ROOT;
           currentFileIdx = flat;
           startOEF();
         }
@@ -1057,7 +967,6 @@ void handleShort(uint8_t mask) {
             for (uint8_t j = 0; j < getMaxFiles(); j++) {
               if (isFreeEntry(j)) continue;
               FileEntry f; readFileEntry(j, &f);
-              if (f.flags & FLAG_DIR) continue;
               if (f.startBlock <= nextBlock && nextBlock < f.startBlock + f.sizeBlocks) { free = false; break; }
             }
             if (free && nextBlock < getEepromSize()/BLOCK_SIZE && e.sizeBlocks < 255) {
@@ -1145,11 +1054,9 @@ void handleVeryLongAction(uint8_t mask) {
     case DISK:
       if (mask == 3) deleteFile();
       else if (mask == 4) {
-        if (currentDir == ROOT && selectedFile == 0) break;
         uint8_t flat;
         if (!resolveSelected(&flat)) break;
         FileEntry e; readFileEntry(flat, &e);
-        if (e.flags & FLAG_DIR) break;
         if (isSystemDisk()) { readOnlyMsg(); break; }
         renameTarget = flat;
         strcpy(renameBuffer, e.name);
@@ -1290,29 +1197,27 @@ void drawSelectDiskFull() {
   lcd.setCursor(0,1);
   lcd.print("3-back");
 }
-
 void drawDiskFull() {
   lcd.clear();
-  uint8_t total = getDirCount();
+  uint8_t total = getFileCount();
   if (total == 0) {
-    lcd.setCursor(0,0); lcd.print(F("No files"));
-    lcd.setCursor(0,1); lcd.print(F("1+2 to create"));
+    lcd.setCursor(0, 0);
+    lcd.print(F("No files"));
+    lcd.setCursor(0, 1);
+    lcd.print(F("1+2 to create"));
     return;
   }
   if (selectedFile >= total) selectedFile = total - 1;
-  char buf[17];
-  for (uint8_t line = 0; line < 2; line++) {
-    uint8_t pos = (selectedFile + line) % total;
-    buf[0] = 0;
-    if (pos == 0 && currentDir != ROOT) {
-      strcpy(buf, "<UP>");
-    } else {
-      uint8_t flat;
-      if (getVisibleEntry(pos, &flat)) strcpy(buf, getFileName(flat));
-    }
-    lcd.setCursor(0, line);
-    if (line == 0) { lcd.print('>'); lcd.print(buf); }
-    else { lcd.print(' '); lcd.print(buf); }
+  lcd.setCursor(0, 0);
+  lcd.print('>');
+  lcd.print(getFileName(selectedFile));
+  lcd.setCursor(0, 1);
+  if (total == 1) {
+    lcd.print(F(" (only one)"));
+  } else {
+    uint8_t next = (selectedFile + 1) % total;
+    lcd.print(' ');
+    lcd.print(getFileName(next));
   }
 }
 
@@ -1323,7 +1228,6 @@ uint8_t getAppCount() {
   for (uint8_t i = 0; i < getMaxFiles(); i++) {
     if (isFreeEntry(i)) continue;
     FileEntry e; readFileEntry(i, &e);
-    if (e.flags & FLAG_DIR) continue;
     if (e.flags & 0x01) c++;
   }
   currentDisk = oldDisk;
@@ -1338,7 +1242,6 @@ uint8_t getAppFile(uint8_t pos) {
   for (uint8_t i = 0; i < getMaxFiles(); i++) {
     if (isFreeEntry(i)) continue;
     FileEntry e; readFileEntry(i, &e);
-    if (e.flags & FLAG_DIR) continue;
     if (!(e.flags & 0x01)) continue;
     if (seen == pos) { result = i; break; }
     seen++;
@@ -1589,24 +1492,14 @@ void drawContextMenuFull() {
 void drawInfoScreenFull() {
   showSystemInfo();
 }
-
 bool resolveSelected(uint8_t* flat) {
-  if (currentDir != ROOT && selectedFile == 0) return false;
-  return getVisibleEntry(selectedFile, flat);
+  if (selectedFile >= getFileCount()) return false;
+  *flat = selectedFile;
+  return true;
 }
-
 void openFile() {
-  if (getDirCount() == 0) return;
   uint8_t flat;
-  if (!resolveSelected(&flat)) {
-    if (currentDir != ROOT) {
-      FileEntry d; readFileEntry(currentDir, &d);
-      currentDir = d.parent;
-    }
-    selectedFile = 0; displayNeedsFullRedraw = true; return;
-  }
-  FileEntry e; readFileEntry(flat, &e);
-  if (e.flags & FLAG_DIR) { currentDir = flat; selectedFile = 0; displayNeedsFullRedraw = true; return; }
+  if (!resolveSelected(&flat)) return;
   currentFileIdx = flat;
   Extension ext = getCurrentExtension();
   if (ext == EXT_OEF) startOEF();
@@ -1614,81 +1507,100 @@ void openFile() {
   else currentState = VIEWER;
   displayNeedsFullRedraw = true;
 }
-
 void editFile() {
-  if (getDirCount() == 0) return;
-  if (isSystemDisk()) { readOnlyMsg(); return; }
-  uint8_t flat;
-  if (!resolveSelected(&flat)) {
-    if (currentDir != ROOT) {
-      FileEntry d; readFileEntry(currentDir, &d);
-      currentDir = d.parent;
-    }
-    selectedFile = 0; displayNeedsFullRedraw = true; return;
+  if (getFileCount() == 0) return;
+  if (isSystemDisk()) {
+    readOnlyMsg();
+    return;
   }
-  FileEntry e; readFileEntry(flat, &e);
-  if (e.flags & FLAG_DIR) { currentDir = flat; selectedFile = 0; displayNeedsFullRedraw = true; return; }
+  uint8_t flat;
+  if (!resolveSelected(&flat)) return;
   currentFileIdx = flat;
   Extension ext = getCurrentExtension();
-  if (ext == EXT_TXT) { currentBlock = 0; loadBlock(currentBlock); currentCharIndex = 0; }
-  else { currentBlock = 0; loadBlock(currentBlock); currentByte = 0; }
+  if (ext == EXT_TXT) {
+    currentBlock = 0;
+    loadBlock(currentBlock);
+    currentCharIndex = 0;
+  } else {
+    currentBlock = 0;
+    loadBlock(currentBlock);
+    currentByte = 0;
+  }
   currentState = EDIT;
   displayNeedsFullRedraw = true;
 }
-
 void fileInfo() {
-  if (getDirCount() == 0) return;
+  if (getFileCount() == 0) return;
   uint8_t flat;
   if (!resolveSelected(&flat)) return;
-  FileEntry e; readFileEntry(flat, &e);
-  lcd.clear(); lcd.setCursor(0,0); lcd.print(e.name);
-  lcd.setCursor(0,1);
-  if (e.flags & FLAG_DIR) lcd.print(F("<DIR>"));
-  else {
-    uint16_t fileBytes = e.sizeBlocks * BLOCK_SIZE;
-    lcd.print(F("Sz:"));
-    lcd.print(fileBytes);
-    lcd.print(F(" B"));
-  }
-  delay(1500); displayNeedsFullRedraw = true;
-}
-
-void createFile() {
-  if (isSystemDisk()) { readOnlyMsg(); return; }
-  uint8_t idx = 0xFF;
-  for (uint8_t i = 0; i < getMaxFiles(); i++) {
-    if (isFreeEntry(i)) { idx = i; break; }
-  }
-  if (idx == 0xFF) { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Max files")); delay(1000); return; }
-  char ext[4]; chooseExtensionDialog(ext);
-  char newName[FULLNAME_LEN+1]; strcpy(newName, "NEWFILE."); strcat(newName, ext);
-  uint16_t start = findFreeBlock();
-  if (start == 0xFFFF) { lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Disk full!")); delay(1000); return; }
-  FileEntry newEntry;
-  memset(newEntry.name, ' ', FULLNAME_LEN);
-  strcpy(newEntry.name, newName);
-  newEntry.startBlock = start;
-  newEntry.sizeBlocks = 1;
-  newEntry.flags = (strcmp(ext, "OEF") == 0) ? 0x01 : 0x00;
-  newEntry.parent = currentDir;
-  writeFileEntry(idx, &newEntry);
-  for (int i = 0; i < BLOCK_SIZE; i++) writeEEPROM(start * BLOCK_SIZE + i, 0x00);
-  selectedFile = getDirCount() - 1;
-  lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Created")); delay(500);
+  FileEntry e;
+  readFileEntry(flat, &e);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(e.name);
+  lcd.setCursor(0, 1);
+  lcd.print(F("Sz:"));
+  lcd.print(e.sizeBlocks * BLOCK_SIZE);
+  lcd.print(F(" B"));
+  delay(1500);
   displayNeedsFullRedraw = true;
 }
-
+void createFile() {
+  if (isSystemDisk()) {
+    readOnlyMsg();
+    return;
+  }
+  uint8_t idx = getFileCount();
+  if (idx >= getMaxFiles()) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(F("Max files"));
+    delay(1000);
+    return;
+  }
+  char ext[4];
+  chooseExtensionDialog(ext);
+  char newName[FULLNAME_LEN + 1];
+  strcpy(newName, "NEWFILE.");
+  strcat(newName, ext);
+  uint16_t start = findFreeBlock();
+  if (start == 0xFFFF) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(F("Disk full!"));
+    delay(1000);
+    return;
+  }
+  FileEntry e;
+  memset(e.name, ' ', FULLNAME_LEN);
+  strcpy(e.name, newName);
+  e.startBlock = start;
+  e.sizeBlocks = 1;
+  e.flags = strcmp(ext, "OEF") == 0 ? 0x01 : 0x00;
+  writeFileEntry(idx, &e);
+  for (uint8_t i = 0; i < BLOCK_SIZE; i++) writeEEPROM(start * BLOCK_SIZE + i, 0x00);
+  selectedFile = idx;
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Created"));
+  delay(500);
+  displayNeedsFullRedraw = true;
+}
 void deleteFile() {
-  if (isSystemDisk()) { readOnlyMsg(); return; }
-  uint8_t flat;
-  if (!resolveSelected(&flat)) return;
-  FileEntry e; readFileEntry(flat, &e);
-  if (e.flags & FLAG_DIR) return;
-  clearFileEntry(flat);
-  uint8_t total = getDirCount();
-  if (selectedFile > 0) selectedFile--;
-  if (selectedFile >= total && total > 0) selectedFile = total - 1;
-  lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Deleted")); delay(500);
+  if (isSystemDisk()) {
+    readOnlyMsg();
+    return;
+  }
+  uint8_t count = getFileCount();
+  if (count == 0 || selectedFile >= count) return;
+  deleteFileEntry(selectedFile);
+  count--;
+  if (count == 0) selectedFile = 0;
+  else if (selectedFile >= count) selectedFile = count - 1;
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Deleted"));
+  delay(500);
   displayNeedsFullRedraw = true;
 }
 
@@ -1731,7 +1643,6 @@ void eraseDisk() {
   lcd.clear(); lcd.setCursor(0,0); lcd.print(F("Erased!"));
   delay(1000);
   initDiskLayout();
-  currentDir = ROOT;
   currentState = MAIN; displayNeedsFullRedraw = true;
 }
 
@@ -1842,19 +1753,30 @@ void executeOneInstruction() {
     }
   }
 }
-
 void playOMF() {
   uint8_t flat;
   if (!resolveSelected(&flat)) return;
-  currentFileIdx = flat; currentState = PLAYER; displayNeedsFullRedraw = true;
-  FileEntry e; readFileEntry(currentFileIdx, &e);
+  currentFileIdx = flat;
+  currentState = PLAYER;
+  displayNeedsFullRedraw = true;
+  FileEntry e;
+  readFileEntry(currentFileIdx, &e);
   uint16_t addr = e.startBlock * BLOCK_SIZE;
-  for (uint16_t i=0; i<e.sizeBlocks*BLOCK_SIZE; i++) {
-    uint8_t note = readEEPROM(addr+i); if (note==0x00) break;
-    if (note>=0x80 && note<=0xB6) { i++; if (i>=e.sizeBlocks*BLOCK_SIZE) break;
-      uint8_t dur = readEEPROM(addr+i); if (soundEnabled) { tone(BUZZER, noteToFreq(note), dur*50); delay(dur*50); } }
+  for (uint16_t i = 0; i < e.sizeBlocks * BLOCK_SIZE; i++) {
+    uint8_t note = readEEPROM(addr + i);
+    if (note == 0x00) break;
+    if (note >= 0x80 && note <= 0xB6) {
+      i++;
+      if (i >= e.sizeBlocks * BLOCK_SIZE) break;
+      uint8_t dur = readEEPROM(addr + i);
+      if (soundEnabled) {
+        tone(BUZZER, noteToFreq(note), dur * 50);
+        delay(dur * 50);
+      }
+    }
   }
-  currentState = DISK; displayNeedsFullRedraw = true;
+  currentState = DISK;
+  displayNeedsFullRedraw = true;
 }
 
 static const uint16_t noteFreqTable[] PROGMEM = {
@@ -1901,7 +1823,6 @@ void renameInsert() {
 
 void selectDisk(uint8_t disk) {
   currentDisk = disk;
-  currentDir = ROOT;
   selectedFile = 0;
 }
 
@@ -1961,7 +1882,6 @@ void createDefaultFile() {
   e.startBlock = start;
   e.sizeBlocks = 1;
   e.flags = 0;
-  e.parent = ROOT;
   writeFileEntry(idx, &e);
   for (int i = 0; i < BLOCK_SIZE; i++) writeEEPROM(start * BLOCK_SIZE + i, 0x00);
 }
@@ -1978,7 +1898,6 @@ void createHelloOef() {
   e.startBlock = start;
   e.sizeBlocks = 1;
   e.flags = 0x01;
-  e.parent = ROOT;
   writeFileEntry(idx, &e);
   uint8_t prog[] = {0x40, 0x29, 'H','E','L','L','O', 0x00};
   for (int i=0; i<sizeof(prog); i++) writeEEPROM(start * BLOCK_SIZE + i, prog[i]);
@@ -1997,7 +1916,6 @@ void createHiOef() {
   e.startBlock = start;
   e.sizeBlocks = 1;
   e.flags = 0x01;
-  e.parent = ROOT;
   writeFileEntry(idx, &e);
   uint8_t prog[] = {0x40, 0x29, 'H','I', 0x00, 0x47, 0x41};
   for (int i=0; i<sizeof(prog); i++) writeEEPROM(start * BLOCK_SIZE + i, prog[i]);
@@ -2014,7 +1932,6 @@ void writeBuiltinProgram(const char* name, const uint8_t* prog, uint16_t len, ui
   e.startBlock = start;
   e.sizeBlocks = blocks;
   e.flags = 0x01;
-  e.parent = ROOT;
   writeFileEntry(idx, &e);
   uint16_t total = blocks * BLOCK_SIZE;
   for (uint16_t i = 0; i < total; i++) {
