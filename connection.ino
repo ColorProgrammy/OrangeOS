@@ -172,6 +172,15 @@ void handleConnectionPacket(uint8_t cmd, uint8_t* p, uint8_t len) {
       connSendStatus(cmd, CONN_ST_OK);
       break;
     }
+    case CONN_CMD_SETTIME: {
+      if (len < 7) { connSendStatus(cmd, CONN_ST_ERR); break; }
+      uint16_t yr = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+      uint8_t mo = p[2], d = p[3], h = p[4], mi = p[5], s = p[6];
+      DateTime dt(yr, mo, d, h, mi, s);
+      rtc.adjust(dt);
+      connSendStatus(cmd, CONN_ST_OK);
+      break;
+    }
     default:
       connSendStatus(cmd, CONN_ST_ERR);
       break;

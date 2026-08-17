@@ -95,13 +95,18 @@ void loop() {
   static bool veryLongHandled = false;
   static bool exitHandled = false;
   static bool active = false;
+  static bool wakeConsume = false;
 
   uint8_t mask = getButtonMask();
 
   connectionPoll();
 
   if (sleeping) {
-    if (mask != 0) wakeFromSleep();
+    if (mask != 0) { wakeFromSleep(); wakeConsume = true; }
+    return;
+  }
+  if (wakeConsume) {
+    if (mask == 0) { wakeConsume = false; active = false; peakMask = 0; }
     return;
   }
   if (mask != 0) lastActivity = millis();

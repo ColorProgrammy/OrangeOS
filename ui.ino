@@ -544,7 +544,8 @@ void renameInsert() {
 void handleShort(uint8_t mask) {
   switch (currentState) {
     case MAIN:
-      if (mask == 1) { currentState = SELECT_DISK; displayNeedsFullRedraw = true; }
+      if (mask == 1) { selectDisk(0); currentState = DISK; selectedFile = 0; displayNeedsFullRedraw = true; }
+      else if (mask == 2) { selectDisk(1); currentState = DISK; selectedFile = 0; displayNeedsFullRedraw = true; }
       else if (mask == 4) { currentState = CONTEXT_MENU; contextMenuIndex = 0; displayNeedsFullRedraw = true; }
       break;
     case SELECT_DISK:

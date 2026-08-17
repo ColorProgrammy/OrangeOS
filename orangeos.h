@@ -173,6 +173,7 @@ const unsigned long DEBOUNCE_MS = 30;
 #define CONN_CMD_DELETE 0x06
 #define CONN_CMD_CREATE 0x07
 #define CONN_CMD_RUN    0x08
+#define CONN_CMD_SETTIME 0x09
 #define CONN_ST_OK   0x00
 #define CONN_ST_ERR  0x01
 #define CONN_ST_RO   0x02   // read-only (tried to write C:)
