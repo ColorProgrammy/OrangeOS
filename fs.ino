@@ -215,9 +215,63 @@ void cyclicMove(uint8_t &pos, uint8_t max, bool forward) {
 }
 
 void eraseInternalEeprom() {
-  for (int i = 0; i < INT_EEPROM_SIZE; i++) {
+  for (int i = 0; i < SETTINGS_EE_ADDR; i++) {
     EEPROM.update(i, 0xFF);
   }
+}
+
+void loadSettings() {
+  uint8_t s = EEPROM.read(SETTINGS_EE_ADDR);
+  uint8_t g = EEPROM.read(SETTINGS_EE_ADDR + 1);
+  if (s == 0xFF) {
+    soundEnabled = true;
+    currentGreeting = random(greetCount);
+    saveSettings();
+  } else {
+    soundEnabled = (s != 0);
+    currentGreeting = (g < greetCount) ? g : 0;
+  }
+}
+
+void saveSettings() {
+  EEPROM.update(SETTINGS_EE_ADDR, soundEnabled ? 1 : 0);
+  EEPROM.update(SETTINGS_EE_ADDR + 1, currentGreeting);
+}
+
+void enterSleep() {
+  sleeping = true;
+  lcd.noBacklight();
+}
+
+void wakeFromSleep() {
+  sleeping = false;
+  lcd.backlight();
+  lastActivity = millis();
+  displayNeedsFullRedraw = true;
+}
+
+bool createFileNamed(uint8_t disk, const char* name, uint8_t blocks) {
+  uint8_t old = currentDisk;
+  currentDisk = disk;
+  if (disk == 0) { currentDisk = old; return false; }
+  uint8_t idx = getFileCount();
+  if (idx >= getMaxFiles()) { currentDisk = old; return false; }
+  uint16_t start = findFreeBlock();
+  if (start == 0xFFFF) { currentDisk = old; return false; }
+  if (blocks == 0) blocks = 1;
+  FileEntry e;
+  memset(e.name, ' ', FULLNAME_LEN);
+  strncpy(e.name, name, FULLNAME_LEN);
+  e.name[FULLNAME_LEN] = 0;
+  e.startBlock = start;
+  e.sizeBlocks = blocks;
+  e.flags = (strstr(name, ".OEF")) ? 0x01 : 0x00;
+  writeFileEntry(idx, &e);
+  for (uint16_t i = 0; i < (uint16_t)blocks * BLOCK_SIZE; i++) {
+    writeEEPROM(start * BLOCK_SIZE + i, 0x00);
+  }
+  currentDisk = old;
+  return true;
 }
 
 void showSystemInfo() {

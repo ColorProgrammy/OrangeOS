@@ -45,12 +45,18 @@ uint8_t settingsIndex = 0;
 uint8_t currentPrivilege = 0;
 uint16_t viewerOffset = 0;
 
+bool sleeping = false;
+unsigned long lastActivity = 0;
+bool pcConnected = false;
+uint8_t execFileIdx = 0;
+
 void setup() {
   pinMode(BTN1, INPUT_PULLUP);
   pinMode(BTN2, INPUT_PULLUP);
   pinMode(BTN3, INPUT_PULLUP);
   pinMode(BUZZER, OUTPUT);
   Wire.begin();
+  Serial.begin(CONN_BAUD);
   lcd.init();
   lcd.backlight();
   lcd.clear();
@@ -65,11 +71,11 @@ void setup() {
   }
   if (rtc.lostPower()) {
     DateTime now = rtc.now();
-    if (now.year() < 2020) rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    if (now.year() < 2020) rtc.adjust(DateTime(2024, 1, 1, 0, 0, 0));
   }
 
   currentDisk = 0;
-  eraseInternalEeprom();
+  loadSettings();
   if (getFileCount() == 0) {
     createBuiltinFiles();
   }
@@ -78,6 +84,7 @@ void setup() {
 
   currentState = MAIN;
   currentGreeting = random(greetCount);
+  lastActivity = millis();
   displayNeedsFullRedraw = true;
 }
 
@@ -90,6 +97,16 @@ void loop() {
   static bool active = false;
 
   uint8_t mask = getButtonMask();
+
+  connectionPoll();
+
+  if (sleeping) {
+    if (mask != 0) wakeFromSleep();
+    return;
+  }
+  if (mask != 0) lastActivity = millis();
+  if (!oefRunning && !pcConnected && (millis() - lastActivity > SLEEP_TIMEOUT_MS)) enterSleep();
+  if (pcConnected && (millis() - lastActivity > 10000)) pcConnected = false;
 
   if (oefRunning) {
     if (mask == 7) {

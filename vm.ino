@@ -250,7 +250,7 @@ const uint8_t opcodeCodes[] PROGMEM = {
   0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53,
   0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60,
   0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D,
-  0x2B, 0x70
+   0x2B, 0x70
 };
 
 // NOTE: JUMP (0x42) is a short 1-byte jump (within first 256 bytes of the file).
@@ -260,7 +260,7 @@ const uint8_t opcodeArgBytes[] PROGMEM = {
   1, 2, 2, 2, 2, 2, 2, 1,
   3, 1, 1, 2, 2, 2, 2, 1, 3, 3, 3, 3, 2,
   5, 2, 2, 2, 2, 1, 1, 1, 7, 7, 7, 7, 5,
-  2, 0
+    2, 0
 };
 
 const uint8_t opcodeCount = sizeof(opcodeCodes) / sizeof(opcodeCodes[0]);
@@ -274,6 +274,7 @@ int8_t getOpcodeIndex(uint8_t byte) {
 
 void startOEF() {
   pc = 0;
+  execFileIdx = currentFileIdx;
   memset(vars8, 0, sizeof(vars8));
   memset(vars16, 0, sizeof(vars16));
   memset(vars32, 0, sizeof(vars32));
@@ -282,8 +283,17 @@ void startOEF() {
   currentState = RUN_OEF; displayNeedsFullRedraw = true;
 }
 
+static uint16_t rd16(uint16_t a) {
+  return (uint16_t)readEEPROM(a) | ((uint16_t)readEEPROM(a + 1) << 8);
+}
+static uint32_t rd32(uint16_t a) {
+  uint32_t lo = rd16(a);
+  uint32_t hi = rd16(a + 2);
+  return lo | (hi << 16);
+}
+
 void executeOneInstruction() {
-  FileEntry e; readFileEntry(currentFileIdx, &e);
+  FileEntry e; readFileEntry(execFileIdx, &e);
   uint16_t fileSizeBytes = (uint16_t)e.sizeBlocks * BLOCK_SIZE;
   uint16_t addr = e.startBlock * BLOCK_SIZE;
 
@@ -327,17 +337,17 @@ void executeOneInstruction() {
     case 0x44: { uint8_t d = readEEPROM(addr + pc); pc++; oefDelayUntil = millis() + d * 100; break; }
     case 0x47: oefPaused = true; break;
     case 0x42: pc = readEEPROM(addr + pc); break;
-    case 0x2B: pc = readEEPROM(addr + pc) | (readEEPROM(addr + pc + 1) << 8); break;
+    case 0x2B: pc = rd16(addr + pc); break;
     case 0x43: { uint8_t var = readEEPROM(addr + pc)-0x60; pc++; int8_t val = (int8_t)readEEPROM(addr + pc); pc++; if(var<32) vars8[var]=val; break; }
     case 0x48: { uint8_t var = readEEPROM(addr + pc)-0x60; pc++; if(var<32) vars8[var]++; break; }
     case 0x49: { uint8_t var = readEEPROM(addr + pc)-0x60; pc++; if(var<32) vars8[var]--; break; }
     case 0x4A: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; uint8_t cond = readEEPROM(addr+pc); pc++; int8_t val = (int8_t)readEEPROM(addr+pc); pc++;
-      uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2;
+      uint16_t jumpAddr = rd16(addr+pc); pc+=2;
       if (var>=32) break; bool res=false; int8_t v=vars8[var];
       if (cond==0x3A) res=(v==val); else if(cond==0x3B) res=(v!=val); else if(cond==0x3C) res=(v<val); else if(cond==0x3D) res=(v>val); else if(cond==0x3E) res=(v<=val); else if(cond==0x3F) res=(v>=val);
       if (res) pc=jumpAddr; break; }
     case 0x4B: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; if(var<32) { while(true) { uint8_t m; syscall(SYS_GETBTN, &m, 1); if(m!=0) { if(m==7) { oefRunning=false; oefPaused=false; currentState=MAIN; displayNeedsFullRedraw=true; return; } while(getButtonMask()!=0) delay(10); vars8[var]=m; break; } delay(10); } } break; }
-    case 0x45: { uint16_t freq = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint8_t dur = readEEPROM(addr+pc); pc++; uint8_t args[3]; *(uint16_t*)(args) = freq; args[2] = dur; syscall(SYS_TONE, args, 3); oefDelayUntil=millis()+dur*10; break; }
+    case 0x45: { uint16_t freq = rd16(addr+pc); pc+=2; uint8_t dur = readEEPROM(addr+pc); pc++; uint8_t args[3]; *(uint16_t*)(args) = freq; args[2] = dur; syscall(SYS_TONE, args, 3); oefDelayUntil=millis()+dur*10; break; }
     case 0x4C: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; uint8_t max = readEEPROM(addr+pc); pc++; if(var<32 && max>0) vars8[var] = random(max); break; }
     case 0x4D: { uint8_t col = readEEPROM(addr+pc); pc++; uint8_t row = readEEPROM(addr+pc); pc++; uint8_t loc[2] = {col, row}; syscall(SYS_LOCATE, loc, 2); break; }
     case 0x4E: { uint8_t note = readEEPROM(addr+pc); pc++; uint8_t dur = readEEPROM(addr+pc); pc++; uint16_t freq = noteToFreq(note); uint8_t args[3]; *(uint16_t*)(args) = freq; args[2] = dur; syscall(SYS_TONE, args, 3); oefDelayUntil = millis() + dur*50; break; }
@@ -346,7 +356,7 @@ void executeOneInstruction() {
     case 0x51: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1<32) { int8_t v2=(var2>=0x60 && var2<0x80)?vars8[var2-0x60]:(int8_t)var2; vars8[var1]*=v2; } break; }
     case 0x52: { uint8_t var1 = readEEPROM(addr+pc)-0x60; pc++; uint8_t var2 = readEEPROM(addr+pc); pc++; if(var1<32) { int8_t v2=(var2>=0x60 && var2<0x80)?vars8[var2-0x60]:(int8_t)var2; if(v2!=0) vars8[var1]/=v2; } break; }
     case 0x53: { uint8_t var = readEEPROM(addr+pc)-0x60; pc++; if(var<32) { uint8_t m; syscall(SYS_GETBTN, &m, 1); vars8[var]=m; } break; }
-    case 0x54: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair<8) vars16[pair]=val; break; }
+    case 0x54: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = rd16(addr+pc); pc+=2; if(pair<8) vars16[pair]=val; break; }
     case 0x55: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; if(pair<8) vars16[pair]++; break; }
     case 0x56: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; if(pair<8) vars16[pair]--; break; }
     case 0x57: { uint8_t pairA = readEEPROM(addr+pc)-0x60; pc++; uint8_t pairB = readEEPROM(addr+pc)-0x60; pc++; if(pairA<8 && pairB<8) vars16[pairA] += vars16[pairB]; break; }
@@ -354,12 +364,12 @@ void executeOneInstruction() {
     case 0x59: { uint8_t pairA = readEEPROM(addr+pc)-0x60; pc++; uint8_t pairB = readEEPROM(addr+pc)-0x60; pc++; if(pairA<8 && pairB<8) vars16[pairA] *= vars16[pairB]; break; }
     case 0x5A: { uint8_t pairA = readEEPROM(addr+pc)-0x60; pc++; uint8_t pairB = readEEPROM(addr+pc)-0x60; pc++; if(pairA<8 && pairB<8 && vars16[pairB]!=0) vars16[pairA] /= vars16[pairB]; break; }
     case 0x5B: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; if(pair<8) { syscall(SYS_PRINT_INT16, (uint8_t*)&vars16[pair], 2); } break; }
-    case 0x5C: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair<8 && vars16[pair]==val) pc=jumpAddr; break; }
-    case 0x5D: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair<8 && vars16[pair]!=val) pc=jumpAddr; break; }
-    case 0x5E: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair<8 && vars16[pair]>val) pc=jumpAddr; break; }
-    case 0x5F: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair<8 && vars16[pair]<val) pc=jumpAddr; break; }
-    case 0x60: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t maxVal = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(pair<8 && maxVal>0) vars16[pair] = random(maxVal); break; }
-    case 0x61: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24); pc+=4; if(var<16) vars32[var]=val; break; }
+    case 0x5C: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = rd16(addr+pc); pc+=2; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(pair<8 && vars16[pair]==val) pc=jumpAddr; break; }
+    case 0x5D: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = rd16(addr+pc); pc+=2; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(pair<8 && vars16[pair]!=val) pc=jumpAddr; break; }
+    case 0x5E: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = rd16(addr+pc); pc+=2; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(pair<8 && vars16[pair]>val) pc=jumpAddr; break; }
+    case 0x5F: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t val = rd16(addr+pc); pc+=2; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(pair<8 && vars16[pair]<val) pc=jumpAddr; break; }
+    case 0x60: { uint8_t pair = readEEPROM(addr+pc)-0x60; pc++; uint16_t maxVal = rd16(addr+pc); pc+=2; if(pair<8 && maxVal>0) vars16[pair] = random(maxVal); break; }
+    case 0x61: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = rd32(addr+pc); pc+=4; if(var<16) vars32[var]=val; break; }
     case 0x62: { uint8_t varA = readEEPROM(addr+pc)-0x80; pc++; uint8_t varB = readEEPROM(addr+pc)-0x80; pc++; if(varA<16 && varB<16) vars32[varA] += vars32[varB]; break; }
     case 0x63: { uint8_t varA = readEEPROM(addr+pc)-0x80; pc++; uint8_t varB = readEEPROM(addr+pc)-0x80; pc++; if(varA<16 && varB<16) vars32[varA] -= vars32[varB]; break; }
     case 0x64: { uint8_t varA = readEEPROM(addr+pc)-0x80; pc++; uint8_t varB = readEEPROM(addr+pc)-0x80; pc++; if(varA<16 && varB<16) vars32[varA] *= vars32[varB]; break; }
@@ -367,11 +377,11 @@ void executeOneInstruction() {
     case 0x66: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; if(var<16) vars32[var]++; break; }
     case 0x67: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; if(var<16) vars32[var]--; break; }
     case 0x68: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; if(var<16) { syscall(SYS_PRINT_INT32, (uint8_t*)&vars32[var], 4); } break; }
-    case 0x69: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24); pc+=4; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(var<16 && vars32[var]==val) pc=jumpAddr; break; }
-    case 0x6A: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24); pc+=4; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(var<16 && vars32[var]!=val) pc=jumpAddr; break; }
-    case 0x6B: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24); pc+=4; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(var<16 && vars32[var]>val) pc=jumpAddr; break; }
-    case 0x6C: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24); pc+=4; uint16_t jumpAddr = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8); pc+=2; if(var<16 && vars32[var]<val) pc=jumpAddr; break; }
-    case 0x6D: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t maxVal = readEEPROM(addr+pc) | (readEEPROM(addr+pc+1)<<8) | (readEEPROM(addr+pc+2)<<16) | (readEEPROM(addr+pc+3)<<24); pc+=4; if(var<16 && maxVal>0) vars32[var] = random(maxVal); break; }
+    case 0x69: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = rd32(addr+pc); pc+=4; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(var<16 && vars32[var]==val) pc=jumpAddr; break; }
+    case 0x6A: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = rd32(addr+pc); pc+=4; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(var<16 && vars32[var]!=val) pc=jumpAddr; break; }
+    case 0x6B: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = rd32(addr+pc); pc+=4; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(var<16 && vars32[var]>val) pc=jumpAddr; break; }
+    case 0x6C: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t val = rd32(addr+pc); pc+=4; uint16_t jumpAddr = rd16(addr+pc); pc+=2; if(var<16 && vars32[var]<val) pc=jumpAddr; break; }
+    case 0x6D: { uint8_t var = readEEPROM(addr+pc)-0x80; pc++; uint32_t maxVal = rd32(addr+pc); pc+=4; if(var<16 && maxVal>0) vars32[var] = random(maxVal); break; }
     case 0x70: {
       uint8_t syscallId = readEEPROM(addr + pc); pc++;
       uint8_t argCount = readEEPROM(addr + pc); pc++;

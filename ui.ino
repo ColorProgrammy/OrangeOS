@@ -550,7 +550,7 @@ void handleShort(uint8_t mask) {
     case SELECT_DISK:
       if (mask == 1) { selectDisk(0); currentState = DISK; selectedFile = 0; displayNeedsFullRedraw = true; }
       else if (mask == 2) { selectDisk(1); currentState = DISK; selectedFile = 0; displayNeedsFullRedraw = true; }
-      else if (mask == 3 || mask == 7) { currentState = MAIN; displayNeedsFullRedraw = true; }
+      else if (mask == 3 || mask == 4 || mask == 7) { currentState = MAIN; displayNeedsFullRedraw = true; }
       break;
     case CONTEXT_MENU:
       if (mask == 1) { if (contextMenuIndex > 0) contextMenuIndex--; else contextMenuIndex = contextCount - 1; displayNeedsFullRedraw = true; }
@@ -689,6 +689,7 @@ void handleShort(uint8_t mask) {
         if (settingsIndex == 0) {
           soundEnabled = !soundEnabled;
           if (soundEnabled) tone(BUZZER, 1500, 60);
+          saveSettings();
           displayNeedsFullRedraw = true;
         } else if (settingsIndex == 1) {
           adjustTime();
